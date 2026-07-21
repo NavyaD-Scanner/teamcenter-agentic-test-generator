@@ -1,4 +1,3 @@
-
 {
   "modules": [
     "Item and Revision Management",
@@ -18,7 +17,8 @@
     "Design",
     "Design Revision",
     "Change Request",
-    "Change Notice"
+    "Change Notice",
+    "Project"
   ],
   "dataset_types": [
     "PDF",
@@ -66,15 +66,5 @@
     "Released",
     "Rejected",
     "Obsolete"
-  ],
-  "test_categories": [
-    "Positive",
-    "Negative",
-    "Validation",
-    "Access Control",
-    "Workflow",
-    "Regression",
-    "Integration",
-    "Performance"
   ]
 }
