@@ -1,589 +1,186 @@
 import re
 from copy import deepcopy
 
-
 MODULE_COVERAGE = {
-    "Item and Revision Management": [
-        "object creation",
-        "mandatory properties",
-        "duplicate ID",
-        "save behavior",
-        "revision creation",
-        "ownership",
-        "search visibility",
-        "release status",
-    ],
-    "Dataset Management": [
-        "dataset creation",
-        "named reference",
-        "file upload",
-        "file download",
-        "check-in",
-        "check-out",
-        "dataset version",
-        "unsupported file type",
-        "access permissions",
-    ],
-    "Workflow": [
-        "workflow initiation",
-        "target attachment",
-        "performer assignment",
-        "approval",
-        "rejection",
-        "rework",
-        "release status",
-        "audit history",
-    ],
-    "BOM and Structure Management": [
-        "child addition",
-        "child removal",
-        "quantity",
-        "find number",
-        "occurrence properties",
-        "duplicate component",
-        "revision rule",
-        "save behavior",
-    ],
-    "Change Management": [
-        "change creation",
-        "affected item",
-        "solution item",
-        "workflow",
-        "approval",
-        "status transition",
-        "audit history",
-    ],
-    "Project Management": [
-        "project creation",
-        "project team",
-        "project assignment",
-        "member access",
-        "non-member access",
-        "project visibility",
-    ],
-    "Access Manager": [
-        "read access",
-        "write access",
-        "delete access",
-        "download access",
-        "ownership",
-        "role authorization",
-    ],
-    "Active Workspace": [
-        "command visibility",
-        "create panel",
-        "edit panel",
-        "property display",
-        "summary view",
-        "search",
-        "messages",
-        "refresh behavior",
-    ],
+    "Item and Revision Management": "Object creation and revision management",
+    "Dataset Management": "Dataset and named-reference management",
+    "Workflow": "Workflow routing, signoff, approval, rejection, and rework",
+    "BOM and Structure Management": "BOM structure and occurrence management",
+    "Change Management": "Change object and lifecycle management",
+    "Project Management": "Project assignment, membership, and visibility",
+    "Access Manager": "Role-based authorization and object access",
+    "Active Workspace": "Commands, panels, properties, and UI behavior",
 }
 
 
-def clean_value(value, default="Not specified"):
+def clean(value, default="Not specified"):
     if value is None:
         return default
-
     if isinstance(value, list):
-        cleaned = [
-            str(item).strip()
-            for item in value
-            if str(item).strip()
-        ]
-
-        return ", ".join(cleaned) if cleaned else default
-
-    value = str(value).strip()
-
-    if not value:
-        return default
-
-    return value
+        values = [str(x).strip() for x in value if str(x).strip()]
+        return ", ".join(values) if values else default
+    text = str(value).strip()
+    return text or default
 
 
-def normalize_lines(value):
+def lines(value):
     if not value:
         return []
-
     if isinstance(value, list):
-        return [
-            str(item).strip()
-            for item in value
-            if str(item).strip()
-        ]
-
-    return [
-        line.strip(" -•\t")
-        for line in str(value).splitlines()
-        if line.strip(" -•\t")
-    ]
+        return [str(x).strip() for x in value if str(x).strip()]
+    return [x.strip(" -•\t") for x in str(value).splitlines() if x.strip(" -•\t")]
 
 
-def sentence_split(text):
-    if not text:
-        return []
-
-    sentences = re.split(
-        r"(?<=[.!?])\s+|\n+",
-        str(text)
-    )
-
-    return [
-        sentence.strip(" -•\t")
-        for sentence in sentences
-        if sentence.strip(" -•\t")
-    ]
+def sentences(text):
+    return [x.strip(" -•\t") for x in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")) if x.strip(" -•\t")]
 
 
-def contains_any(text, keywords):
-    normalized = text.lower()
-
-    return any(
-        keyword.lower() in normalized
-        for keyword in keywords
-    )
+def has(text, words):
+    low = text.lower()
+    return any(word.lower() in low for word in words)
 
 
-def append_unique(values, new_value):
-    if new_value and new_value not in values:
-        values.append(new_value)
-
-
-def detect_rule_type(sentence):
-    text = sentence.lower()
-
-    if contains_any(
-        text,
-        [
-            "workflow",
-            "review",
-            "approve",
-            "reject",
-            "rework",
-            "signoff",
-            "task",
-            "performer",
-        ],
-    ):
+def rule_type(text):
+    if has(text, ["workflow", "review", "approve", "reject", "rework", "signoff", "task", "performer"]):
         return "WF", "Workflow Rule"
-
-    if contains_any(
-        text,
-        [
-            "role",
-            "access",
-            "permission",
-            "authorized",
-            "unauthorized",
-            "only",
-            "member",
-            "non-member",
-        ],
-    ):
+    if has(text, ["role", "access", "permission", "authorized", "unauthorized", "only", "member", "non-member"]):
         return "AR", "Access Rule"
-
-    if contains_any(
-        text,
-        [
-            "mandatory",
-            "required",
-            "invalid",
-            "validation",
-            "must not be empty",
-            "maximum",
-            "minimum",
-            "format",
-        ],
-    ):
+    if has(text, ["mandatory", "required", "invalid", "validation", "must not be empty", "maximum", "minimum", "format"]):
         return "VR", "Validation Rule"
-
-    if contains_any(
-        text,
-        [
-            "dataset",
-            "file",
-            "named reference",
-            "attachment",
-            "property",
-            "attribute",
-            "item id",
-            "revision id",
-        ],
-    ):
+    if has(text, ["dataset", "file", "named reference", "attachment", "property", "attribute", "item id", "revision id"]):
         return "DR", "Data Rule"
-
     return "BR", "Business Rule"
 
 
-def extract_rules(requirement_data):
-    description = clean_value(
-        requirement_data.get(
-            "requirement_description"
-        ),
-        "",
-    )
-
-    business_rules = normalize_lines(
-        requirement_data.get("business_rules")
-    )
-
-    properties = normalize_lines(
-        requirement_data.get("properties")
-    )
-
-    candidate_rules = sentence_split(description)
-    candidate_rules.extend(business_rules)
-
-    for property_definition in properties:
-        property_text = property_definition.lower()
-
-        if contains_any(
-            property_text,
-            [
-                "mandatory",
-                "required",
-                "validation",
-                "maximum",
-                "minimum",
-                "format",
-            ],
-        ):
-            candidate_rules.append(
-                "Validate property: "
-                + property_definition
-            )
-
-    significant_words = [
-        "must",
-        "should",
-        "only",
-        "cannot",
-        "must not",
-        "required",
-        "mandatory",
-        "when",
-        "after",
-        "before",
-        "if",
-        "workflow",
-        "approve",
-        "reject",
-        "status",
-        "access",
-        "assign",
-        "create",
-        "update",
-        "delete",
-        "upload",
-        "download",
-        "release",
-    ]
-
-    filtered_rules = [
-        rule
-        for rule in candidate_rules
-        if contains_any(rule, significant_words)
-    ]
-
-    if not filtered_rules:
-        filtered_rules = candidate_rules
-
-    counters = {
-        "BR": 0,
-        "VR": 0,
-        "WF": 0,
-        "AR": 0,
-        "DR": 0,
-    }
-
-    extracted_rules = []
-    seen_rules = set()
-
-    for candidate in filtered_rules:
-        normalized_candidate = (
-            candidate.strip().lower()
-        )
-
-        if normalized_candidate in seen_rules:
+def extract_rules(data):
+    candidates = sentences(data.get("requirement_description"))
+    candidates += lines(data.get("business_rules"))
+    for prop in lines(data.get("properties")):
+        if has(prop, ["mandatory", "required", "validation", "maximum", "minimum", "format"]):
+            candidates.append("Validate property: " + prop)
+    markers = ["must", "should", "only", "cannot", "required", "mandatory", "when", "after", "before", "if", "workflow", "approve", "reject", "status", "access", "assign", "create", "update", "delete", "upload", "download", "release"]
+    selected = [x for x in candidates if has(x, markers)] or candidates
+    counts = {"BR": 0, "VR": 0, "WF": 0, "AR": 0, "DR": 0}
+    result, seen = [], set()
+    for candidate in selected:
+        key = candidate.lower().strip()
+        if not key or key in seen:
             continue
-
-        seen_rules.add(normalized_candidate)
-
-        prefix, rule_type = detect_rule_type(
-            candidate
-        )
-
-        counters[prefix] += 1
-
-        rule_id = (
-            f"{prefix}-"
-            f"{counters02d}"
-        )
-
-        extracted_rules.append(
-            {
-                "rule_id": rule_id,
-                "rule_type": rule_type,
-                "rule": candidate,
-                "positive_condition": (
-                    "The configured behavior is completed "
-                    "using valid data and an authorized user."
-                ),
-                "negative_condition": (
-                    "The behavior is attempted with invalid "
-                    "data, missing information, or an "
-                    "unauthorized user when applicable."
-                ),
-                "priority": (
-                    "High"
-                    if contains_any(
-                        candidate,
-                        [
-                            "must",
-                            "mandatory",
-                            "only",
-                            "release",
-                            "approve",
-                            "reject",
-                        ],
-                    )
-                    else "Medium"
-                ),
-            }
-        )
-
-    if not extracted_rules:
-        extracted_rules.append(
-            {
-                "rule_id": "BR-01",
-                "rule_type": "Business Rule",
-                "rule": (
-                    "The functionality described by the "
-                    "requirement must operate successfully."
-                ),
-                "positive_condition": (
-                    "Complete the requested operation using "
-                    "valid data."
-                ),
-                "negative_condition": (
-                    "Attempt the requested operation using "
-                    "invalid or incomplete data."
-                ),
-                "priority": "High",
-            }
-        )
-
-    return extracted_rules
+        seen.add(key)
+        prefix, kind = rule_type(candidate)
+        counts[prefix] += 1
+        result.append({
+            "rule_id": f"{prefix}-{counts[prefix]:02d}",
+            "rule_type": kind,
+            "rule": candidate,
+            "positive_condition": "Complete the configured behavior with valid data and an authorized user.",
+            "negative_condition": "Attempt the behavior with invalid, incomplete, or unauthorized input where applicable.",
+            "priority": "High" if has(candidate, ["must", "mandatory", "only", "release", "approve", "reject"]) else "Medium",
+        })
+    if not result:
+        result.append({"rule_id": "BR-01", "rule_type": "Business Rule", "rule": "The described functionality must operate successfully.", "positive_condition": "Complete with valid data.", "negative_condition": "Attempt with invalid or incomplete data.", "priority": "High"})
+    return result
 
 
-def build_analysis(requirement_data):
-    module = clean_value(
-        requirement_data.get("module")
-    )
-
-    object_type = clean_value(
-        requirement_data.get(
-            "business_object_type"
-        )
-    )
-
-    workflow = clean_value(
-        requirement_data.get("workflow"),
-        "Not applicable",
-    )
-
-    roles = requirement_data.get(
-        "user_roles",
-        [],
-    )
-
-    performers = requirement_data.get(
-        "performers",
-        {},
-    )
-
+def build_analysis(data):
+    module = clean(data.get("module"))
+    object_type = clean(data.get("business_object_type"))
+    workflow = clean(data.get("workflow"), "Not applicable")
     actors = []
-
-    for role in roles:
-        append_unique(actors, role)
-
-    for performer_role in performers.values():
-        if performer_role != "Not selected":
-            append_unique(actors, performer_role)
-
-    rules = extract_rules(requirement_data)
-
-    properties = normalize_lines(
-        requirement_data.get("properties")
-    )
-
-    datasets = []
-
-    dataset_type = clean_value(
-        requirement_data.get("dataset_type"),
-        "Not applicable",
-    )
-
-    if dataset_type != "Not applicable":
-        datasets.append(dataset_type)
-
-    missing_information = []
-
-    if object_type == "Not specified":
-        missing_information.append(
-            "Business object type is not specified."
-        )
-
-    if not actors:
-        missing_information.append(
-            "User roles are not specified."
-        )
-
+    for actor in data.get("user_roles", []):
+        if actor not in actors: actors.append(actor)
+    for actor in data.get("performers", {}).values():
+        if actor and actor != "Not selected" and actor not in actors: actors.append(actor)
+    missing = []
+    if object_type == "Not specified": missing.append("Business object type is not specified.")
+    if not actors: missing.append("User roles are not specified.")
+    dataset = clean(data.get("dataset_type"), "Not applicable")
     return {
-        "requirement_id": clean_value(
-            requirement_data.get(
-                "requirement_id"
-            ),
-            "REQ-001",
-        ),
-        "interpreted_requirement": clean_value(
-            requirement_data.get(
-                "requirement_description"
-            )
-        ),
-        "business_objective": clean_value(
-            requirement_data.get(
-                "requirement_title"
-            )
-        ),
+        "requirement_id": clean(data.get("requirement_id"), "REQ-001"),
+        "interpreted_requirement": clean(data.get("requirement_description")),
+        "business_objective": clean(data.get("requirement_title")),
         "module": module,
-        "feature": (
-            MODULE_COVERAGE.get(
-                module,
-                ["functional validation"],
-            )[0]
-        ),
+        "feature": MODULE_COVERAGE.get(module, "Functional validation"),
         "actors": actors,
         "objects": [object_type],
-        "datasets": datasets,
+        "datasets": [] if dataset == "Not applicable" else [dataset],
         "workflow": workflow,
-        "properties": properties,
-        "rules": rules,
-        "expected_outputs": [
-            clean_value(
-                requirement_data.get(
-                    "expected_status"
-                ),
-                "Expected business result",
-            )
-        ],
-        "failure_conditions": [
-            rule["negative_condition"]
-            for rule in rules
-        ],
-        "dependencies": [
-            "Required users, roles, test objects and "
-            "Teamcenter configuration must exist."
-        ],
-        "assumptions": [
-            "The target test environment is available.",
-            "The selected users have the configured "
-            "Teamcenter group and role assignments.",
-        ],
-        "missing_information": missing_information,
+        "properties": lines(data.get("properties")),
+        "rules": extract_rules(data),
+        "expected_outputs": [clean(data.get("expected_status"), "Expected business result")],
+        "failure_conditions": ["Invalid or unauthorized operations are prevented without corrupting data."],
+        "dependencies": ["The required Teamcenter configuration, users, roles, and test data exist."],
+        "assumptions": ["The test environment is available.", "Selected users have the intended group and role assignments."],
+        "missing_information": missing,
     }
 
 
-def get_category(rule):
-    rule_type = rule["rule_type"]
-
-    mapping = {
-        "Workflow Rule": "Workflow",
-        "Access Rule": "Access Control",
-        "Validation Rule": "Validation",
-        "Data Rule": "Data Validation",
-        "Business Rule": "Positive Functional",
-    }
-
-    return mapping.get(
-        rule_type,
-        "Positive Functional",
-    )
+def category(rule):
+    return {"Workflow Rule": "Workflow", "Access Rule": "Access Control", "Validation Rule": "Validation", "Data Rule": "Data Validation"}.get(rule["rule_type"], "Positive Functional")
 
 
-def build_coverage_plan(analysis):
-    coverage_items = []
+def build_steps(data, rule, negative=False):
+    module = clean(data.get("module")); obj = clean(data.get("business_object_type")); workflow = clean(data.get("workflow"), "Not applicable")
+    roles = data.get("user_roles", []); role = roles[0] if roles else "Authorized Teamcenter User"
+    expected_status = clean(data.get("expected_status"), "Not specified")
+    steps = [
+        {"step_number": 1, "action": f"Log in to Teamcenter or Active Workspace as {role}.", "expected_result": "Login succeeds and commands allowed for the selected role are displayed."},
+        {"step_number": 2, "action": f"Navigate to the {module} functionality.", "expected_result": f"The {module} interface opens without an application error."},
+        {"step_number": 3, "action": f"Create, locate, or open the required {obj} test object.", "expected_result": f"The required {obj} is available for testing."},
+        {"step_number": 4, "action": f"Use {'invalid, incomplete, or unauthorized' if negative else 'valid'} test data and execute {rule['rule_id']}: {rule['rule']}", "expected_result": "The operation is prevented with an appropriate validation or authorization message." if negative else "The configured action is accepted without an unexpected error."},
+    ]
+    if workflow != "Not applicable" and has(rule["rule"], ["workflow", "approve", "reject", "review", "rework", "task", "status"]):
+        steps.append({"step_number": len(steps)+1, "action": f"Open the {workflow} process, related tasks, and audit information.", "expected_result": "Task assignment, decision, process state, and audit information match the expected negative behavior." if negative else "Task assignment, decision, process state, and audit information match the requirement."})
+    if expected_status != "Not specified":
+        steps.append({"step_number": len(steps)+1, "action": "Refresh and reopen the target object, then inspect its release status.", "expected_result": f"The {expected_status} status is not incorrectly applied." if negative else f"The object has {expected_status} status only when all required conditions are satisfied."})
+    return steps
 
+
+def generate_cases(data, analysis):
+    cases, number = [], 1
+    roles = data.get("user_roles", []); role = roles[0] if roles else "Authorized Teamcenter User"
     for rule in analysis["rules"]:
-        category = get_category(rule)
-
-        coverage_items.append(
-            {
-                "rule_id": rule["rule_id"],
-                "category": category,
-                "test_objective": (
-                    "Verify successful behavior for: "
-                    + rule["rule"]
-                ),
+        for negative in (False, True):
+            test_id = f"TC-{number:03d}"; number += 1
+            cases.append({
+                "test_case_id": test_id,
+                "requirement_id": analysis["requirement_id"],
+                "title": ("Negative validation for " if negative else "Verify ") + f"{rule['rule_id']} - {rule['rule'][:90]}",
+                "module": analysis["module"],
+                "category": "Negative" if negative else category(rule),
                 "priority": rule["priority"],
-                "required_test_count": 1,
-                "reason": (
-                    "Positive validation of the "
-                    "extracted requirement rule."
-                ),
-            }
-        )
+                "objective": ("Verify invalid, incomplete, or unauthorized execution is controlled for " if negative else "Verify successful implementation of ") + rule["rule"],
+                "user_role": role,
+                "preconditions": ["The Teamcenter test environment is available.", "Required configuration and test data exist.", "The test user has the intended role or intentionally lacks it for an access-negative test."],
+                "test_data": [("Invalid/incomplete/unauthorized" if negative else "Valid") + " test object and property values.", "Requirement rule: " + rule["rule"]],
+                "steps": build_steps(data, rule, negative),
+                "final_expected_result": "The invalid operation is prevented and no incorrect data, status, or workflow result occurs." if negative else f"The behavior completes successfully and satisfies {rule['rule_id']}.",
+                "postconditions": ["Record created or modified test data and restore reusable data when required."],
+                "automation_candidate": "Yes",
+                "traceability": [rule["rule_id"]],
+                "assumptions": deepcopy(analysis["assumptions"]),
+                "actual_result": "",
+                "status": "Not Executed",
+            })
+    return cases
 
-        coverage_items.append(
-            {
-                "rule_id": rule["rule_id"],
-                "category": "Negative",
-                "test_objective": (
-                    "Verify controlled failure or "
-                    "prevention for: "
-                    + rule["rule"]
-                ),
-                "priority": rule["priority"],
-                "required_test_count": 1,
-                "reason": (
-                    "Negative validation is required "
-                    "for the extracted requirement rule."
-                ),
-            }
-        )
 
-    return {
-        "coverage_items": coverage_items
+def generate_offline(data):
+    analysis = build_analysis(data)
+    coverage = {"coverage_items": []}
+    for rule in analysis["rules"]:
+        for cat, objective in ((category(rule), "Verify successful behavior for: "), ("Negative", "Verify controlled failure or prevention for: ")):
+            coverage["coverage_items"].append({"rule_id": rule["rule_id"], "category": cat, "test_objective": objective + rule["rule"], "priority": rule["priority"], "required_test_count": 1, "reason": "Requirement-derived offline coverage."})
+    cases = generate_cases(data, analysis)
+    matrix = []
+    for rule in analysis["rules"]:
+        ids = [x["test_case_id"] for x in cases if rule["rule_id"] in x["traceability"]]
+        matrix.append({"rule_id": rule["rule_id"], "rule": rule["rule"], "test_case_ids": ids, "coverage_type": "Positive and Negative", "coverage_status": "Covered" if ids else "Not Covered"})
+    def count(text): return sum(1 for x in cases if text.lower() in x["category"].lower())
+    reviewed = {
+        "review_summary": {"quality_score": 75, "issues_found": ["Offline mode uses deterministic rules rather than an LLM; manually review complex requirements."], "corrections_made": ["Generated positive and negative coverage and rule traceability."], "uncovered_rules": [], "clarification_questions": analysis["missing_information"]},
+        "test_cases": cases,
+        "traceability_matrix": matrix,
+        "coverage_summary": {"generation_mode": "Offline", "total_rules": len(analysis["rules"]), "total_test_cases": len(cases), "positive_test_cases": len(cases)-count("Negative"), "negative_test_cases": count("Negative"), "workflow_test_cases": count("Workflow"), "access_test_cases": count("Access"), "high_priority_test_cases": sum(1 for x in cases if x["priority"] == "High"), "automation_candidates": sum(1 for x in cases if x["automation_candidate"] == "Yes"), "covered_rules": len(matrix), "partially_covered_rules": 0, "blocked_rules": 0},
     }
-
-
-def build_standard_steps(
-    requirement_data,
-    rule,
-    negative=False,
-):
-    module = clean_value(
-        requirement_data.get("module")
-    )
-
-    object_type = clean_value(
-        requirement_data.get(
-            "business_object_type"
-        )
-    )
-
-    workflow = clean_value(
-        requirement_data.get("workflow"),
-        "Not applicable",
-    )
-
-    expected_status = clean_value(
-        requirement_data.get(
-            "expected_status"
-        ),
-        "Not specified",
-    )
-
-    roles = requirement_data.
+    return {"analysis": analysis, "coverage_plan": coverage, "reviewed_result": reviewed}
