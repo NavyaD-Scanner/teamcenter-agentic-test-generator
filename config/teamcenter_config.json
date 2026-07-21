@@ -1,1 +1,80 @@
 
+{
+  "modules": [
+    "Item and Revision Management",
+    "Dataset Management",
+    "Workflow",
+    "BOM and Structure Management",
+    "Change Management",
+    "Project Management",
+    "Access Manager",
+    "Active Workspace"
+  ],
+  "business_object_types": [
+    "Item",
+    "Item Revision",
+    "Document",
+    "Document Revision",
+    "Design",
+    "Design Revision",
+    "Change Request",
+    "Change Notice"
+  ],
+  "dataset_types": [
+    "PDF",
+    "MSWord",
+    "MSExcel",
+    "Text",
+    "DirectModel",
+    "UGMASTER",
+    "UGPART",
+    "JT"
+  ],
+  "workflows": {
+    "TTT Design Release Workflow": [
+      "Initiator",
+      "Review 1 - User",
+      "Review 2",
+      "Additional Reviewer",
+      "Default Approver Role"
+    ],
+    "TTT Status Change Workflow": [
+      "Initiator",
+      "Review 1 - User",
+      "Review 2",
+      "Additional Reviewer",
+      "Default Approver Role"
+    ],
+    "Default Workflow": [
+      "Initiator",
+      "Reviewer",
+      "Approver"
+    ]
+  },
+  "roles": [
+    "Design Engineer",
+    "Design Lead",
+    "Global Document Admin",
+    "Project Manager",
+    "Quality Engineer",
+    "Change Specialist",
+    "System Administrator"
+  ],
+  "release_statuses": [
+    "Working",
+    "In Review",
+    "Released",
+    "Rejected",
+    "Obsolete"
+  ],
+  "test_categories": [
+    "Positive",
+    "Negative",
+    "Validation",
+    "Access Control",
+    "Workflow",
+    "Regression",
+    "Integration",
+    "Performance"
+  ]
+}
