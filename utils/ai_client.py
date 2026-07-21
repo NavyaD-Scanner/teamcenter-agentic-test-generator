@@ -14,38 +14,27 @@ from openai import (
 
 
 def get_setting(name, default=None):
-    """
-    Read a value from Streamlit Secrets first,
-    then from environment variables.
-    """
+    """Read a setting from Streamlit Secrets, then environment variables."""
     try:
         import streamlit as st
 
         if name in st.secrets:
             value = st.secrets[name]
-
             if value is not None:
                 return str(value).strip()
-
     except Exception:
         pass
 
     value = os.getenv(name, default)
-
-    if isinstance(value, str):
-        return value.strip()
-
-    return value
+    return value.strip() if isinstance(value, str) else value
 
 
 def validate_not_placeholder(name, value):
-    """
-    Prevent sample values from being treated as real configuration.
-    """
+    """Reject sample values accidentally copied into Streamlit Secrets."""
     if not value:
         return
 
-    placeholder_words = [
+    placeholders = (
         "replace-with",
         "your-api-key",
         "your-key",
@@ -54,13 +43,12 @@ def validate_not_placeholder(name, value):
         "<api-key>",
         "<endpoint>",
         "<deployment>",
-    ]
+    )
 
-    normalized_value = str(value).lower()
-
-    if any(word in normalized_value for word in placeholder_words):
+    normalized = str(value).lower()
+    if any(item in normalized for item in placeholders):
         raise ValueError(
-            f"{name} still contains an example or placeholder value. "
+            f"{name} contains a sample/placeholder value. "
             "Update it in Streamlit App Settings -> Secrets."
         )
 
@@ -69,49 +57,38 @@ def get_provider_configuration():
     azure_endpoint = get_setting("AZURE_OPENAI_ENDPOINT")
     azure_key = get_setting("AZURE_OPENAI_API_KEY")
     azure_deployment = get_setting("AZURE_OPENAI_DEPLOYMENT")
-    azure_api_version = get_setting(
-        "AZURE_OPENAI_API_VERSION",
-        "2024-10-21",
-    )
+    azure_api_version = get_setting("AZURE_OPENAI_API_VERSION", "2024-10-21")
 
     openai_key = get_setting("OPENAI_API_KEY")
-    openai_model = get_setting(
-        "OPENAI_MODEL",
-        "gpt-4.1-mini",
-    )
+    openai_model = get_setting("OPENAI_MODEL", "gpt-4.1-mini")
 
-    for name, value in [
+    for name, value in (
         ("AZURE_OPENAI_ENDPOINT", azure_endpoint),
         ("AZURE_OPENAI_API_KEY", azure_key),
         ("AZURE_OPENAI_DEPLOYMENT", azure_deployment),
         ("OPENAI_API_KEY", openai_key),
         ("OPENAI_MODEL", openai_model),
-    ]:
+    ):
         validate_not_placeholder(name, value)
 
+    # Azure takes precedence only when a real Azure endpoint is configured.
     if azure_endpoint:
         if not azure_key:
             raise ValueError(
                 "AZURE_OPENAI_ENDPOINT is configured, but "
                 "AZURE_OPENAI_API_KEY is missing."
             )
-
         if not azure_deployment:
             raise ValueError(
                 "AZURE_OPENAI_ENDPOINT is configured, but "
                 "AZURE_OPENAI_DEPLOYMENT is missing."
             )
-
         if not azure_endpoint.startswith("https://"):
-            raise ValueError(
-                "AZURE_OPENAI_ENDPOINT must begin with https://"
-            )
-
+            raise ValueError("AZURE_OPENAI_ENDPOINT must begin with https://")
         if "/openai/deployments/" in azure_endpoint:
             raise ValueError(
-                "AZURE_OPENAI_ENDPOINT must contain only the Azure "
-                "resource endpoint, for example: "
-                "https://my-resource.openai.azure.com"
+                "AZURE_OPENAI_ENDPOINT must contain only the resource endpoint, "
+                "for example https://my-resource.openai.azure.com"
             )
 
         return {
@@ -130,9 +107,8 @@ def get_provider_configuration():
         }
 
     raise ValueError(
-        "No AI provider is configured. Add either OPENAI_API_KEY "
-        "or the complete Azure OpenAI configuration in "
-        "Streamlit App Settings -> Secrets."
+        "No AI provider is configured. Add OPENAI_API_KEY, or the complete "
+        "Azure OpenAI configuration, in Streamlit App Settings -> Secrets."
     )
 
 
@@ -140,12 +116,7 @@ def create_client():
     configuration = get_provider_configuration()
 
     http_client = httpx.Client(
-        timeout=httpx.Timeout(
-            connect=20.0,
-            read=120.0,
-            write=30.0,
-            pool=20.0,
-        ),
+        timeout=httpx.Timeout(connect=20.0, read=120.0, write=30.0, pool=20.0),
         follow_redirects=True,
     )
 
@@ -158,12 +129,7 @@ def create_client():
             max_retries=2,
             http_client=http_client,
         )
-
-        return (
-            client,
-            configuration["deployment"],
-            configuration,
-        )
+        return client, configuration["deployment"], configuration
 
     client = OpenAI(
         api_key=configuration["api_key"],
@@ -171,116 +137,93 @@ def create_client():
         max_retries=2,
         http_client=http_client,
     )
+    return client, configuration["model"], configuration
 
-    return (
-        client,
-        configuration["model"],
-        configuration,
-    )
+
+def test_connection():
+    """Make a small provider request and return a user-safe result."""
+    client, model, configuration = create_client()
+    try:
+        models = client.models.list()
+        _ = models.data
+        return {
+            "success": True,
+            "provider": configuration["provider"],
+            "model_or_deployment": model,
+            "message": "Connection successful.",
+        }
+    except Exception as error:
+        cause = repr(error.__cause__) if error.__cause__ else str(error)
+        return {
+            "success": False,
+            "provider": configuration["provider"],
+            "model_or_deployment": model,
+            "message": f"Connection failed: {type(error).__name__}: {cause}",
+        }
 
 
 def call_ai(system_prompt, user_prompt):
     client, model, configuration = create_client()
 
-    last_error = None
-
     for attempt in range(1, 4):
         try:
-            response = client.chat.completions.create(
-                model=model,
-                temperature=0.15,
-                response_format={
-                    "type": "json_object"
-                },
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt,
-                    },
+            request = {
+                "model": model,
+                "temperature": 0.15,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
                 ],
-            )
+            }
 
+            # JSON mode is supported by most current chat deployments. If a
+            # provider/deployment rejects it, the APIStatusError below gives
+            # the exact HTTP response so the configuration can be corrected.
+            request["response_format"] = {"type": "json_object"}
+
+            response = client.chat.completions.create(**request)
             content = response.choices[0].message.content
-
             if not content:
-                raise ValueError(
-                    "The AI provider returned an empty response."
-                )
-
+                raise ValueError("The AI provider returned an empty response.")
             return content
 
         except AuthenticationError as error:
             raise RuntimeError(
-                "Authentication failed. Verify the API key in "
-                "Streamlit App Settings -> Secrets."
+                "Authentication failed. Verify the API key in Streamlit Secrets."
             ) from error
 
         except RateLimitError as error:
             raise RuntimeError(
-                "The AI provider rejected the request because of "
-                "rate limits, quota, or insufficient API credits."
+                "The request was rejected due to rate limits, quota, or API credits."
             ) from error
 
-        except APITimeoutError as error:
-            last_error = error
-
+        except (APITimeoutError, APIConnectionError) as error:
             if attempt < 3:
                 time.sleep(attempt * 2)
                 continue
 
+            cause = repr(error.__cause__) if error.__cause__ else str(error)
+            endpoint = configuration.get("endpoint", "https://api.openai.com")
             raise RuntimeError(
-                "The request timed out after three attempts. "
-                "Check the provider status, endpoint and network."
-            ) from error
-
-        except APIConnectionError as error:
-            last_error = error
-
-            underlying_error = (
-                repr(error.__cause__)
-                if error.__cause__
-                else "No underlying connection detail was provided."
-            )
-
-            if attempt < 3:
-                time.sleep(attempt * 2)
-                continue
-
-            provider = configuration["provider"]
-
-            endpoint_information = (
-                configuration.get(
-                    "endpoint",
-                    "https://api.openai.com",
-                )
-            )
-
-            raise RuntimeError(
-                "Could not connect to the AI provider after "
-                f"three attempts. Provider: {provider}. "
-                f"Endpoint: {endpoint_information}. "
-                f"Underlying error: {underlying_error}. "
-                "Check the endpoint, DNS, SSL certificate, "
-                "firewall and Streamlit Secrets."
+                "Could not connect to the AI provider after three attempts. "
+                f"Provider: {configuration['provider']}; Endpoint: {endpoint}; "
+                f"Underlying error: {cause}. Check the endpoint, DNS, SSL, "
+                "firewall, provider availability, and Streamlit Secrets."
             ) from error
 
         except APIStatusError as error:
+            response_text = ""
+            try:
+                response_text = error.response.text
+            except Exception:
+                response_text = str(error)
             raise RuntimeError(
-                "The AI provider returned an HTTP error. "
-                f"Status code: {error.status_code}. "
-                f"Response: {error.response.text}"
+                f"AI provider HTTP error {error.status_code}: {response_text}"
             ) from error
 
         except Exception as error:
             raise RuntimeError(
-                f"Unexpected AI request error: "
-                f"{type(error).__name__}: {error}"
+                f"Unexpected AI request error: {type(error).__name__}: {error}"
             ) from error
 
-    raise RuntimeError(
-        f"AI request failed: {last_error}"
-    )
+    raise RuntimeError("The AI request failed after all retry attempts.")
