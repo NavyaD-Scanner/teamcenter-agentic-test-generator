@@ -1,0 +1,6 @@
+Replace these repository files:
+1. app.py
+2. utils/ai_client.py
+3. requirements.txt
+
+Do not upload the TOML examples to the repository as active secrets. Copy ONE example into Streamlit App Settings -> Secrets, replace placeholders, and delete all settings for the unused provider. Reboot the app afterward.
